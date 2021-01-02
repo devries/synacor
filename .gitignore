@@ -1,0 +1,7 @@
+*~
+.*.swp
+.DS_Store
+*.o
+challenge.bin
+arch-spec
+codes.txt
