@@ -2,23 +2,49 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
+
+	"github.com/spf13/pflag"
 )
 
 func main() {
-	content, err := ioutil.ReadFile("challenge.bin")
-	if err != nil {
-		panic(err)
-	}
+	var saveFile string
+	pflag.StringVarP(&saveFile, "savefile", "s", "", "start VM from saved state")
 
-	program := binToProgram(content)
+	pflag.Parse()
 
 	c := NewComputer()
-	c.loadProgram(program)
+
+	if saveFile == "" {
+		content, err := ioutil.ReadFile("challenge.bin")
+		if err != nil {
+			panic(err)
+		}
+
+		c = NewComputer()
+
+		program := binToProgram(content)
+
+		c.loadProgram(program)
+	} else {
+		f, err := os.Open(saveFile)
+		if err != nil {
+			panic(err)
+		}
+
+		decoder := json.NewDecoder(f)
+		err = decoder.Decode(c)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println("Saved VM has been loaded.")
+	}
+
 	go c.run()
-	go provideInputFromStdin(c.input)
+	go provideInputFromStdin(c)
 	for out := range c.output {
 		fmt.Printf("%c", out)
 	}
@@ -39,12 +65,32 @@ func binToProgram(input []byte) []int {
 	return out
 }
 
-func provideInputFromStdin(input chan<- rune) {
+func provideInputFromStdin(c *Computer) {
+	input := c.input
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
-		v := scanner.Text() + "\n"
-		for _, r := range []rune(v) {
-			input <- r
+		v := scanner.Text()
+		switch v {
+		case "-halt":
+			c.keepRunning = false
+			close(c.output)
+		case "-save":
+			f, err := os.Create("dump.vm")
+			if err != nil {
+				fmt.Printf("Unable to create VM output file: %s", err)
+				break
+			}
+			encoder := json.NewEncoder(f)
+			err = encoder.Encode(c)
+			if err != nil {
+				fmt.Printf("Unable to save vm: %s", err)
+				break
+			}
+		default:
+			for _, r := range []rune(v) {
+				input <- r
+			}
+			input <- '\n'
 		}
 	}
 }
