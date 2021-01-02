@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/spf13/pflag"
 )
@@ -75,17 +77,12 @@ func provideInputFromStdin(c *Computer) {
 			c.keepRunning = false
 			close(c.output)
 		case "-save":
-			f, err := os.Create("dump.vm")
-			if err != nil {
-				fmt.Printf("Unable to create VM output file: %s", err)
-				break
-			}
-			encoder := json.NewEncoder(f)
-			err = encoder.Encode(c)
+			err := c.dump()
 			if err != nil {
 				fmt.Printf("Unable to save vm: %s", err)
-				break
 			}
+		case "-info":
+			fmt.Printf(c.getStatus())
 		default:
 			for _, r := range []rune(v) {
 				input <- r
@@ -137,7 +134,7 @@ func (c *Computer) step() {
 	switch op {
 	case 0:
 		// halt
-		fmt.Println("End of Program")
+		fmt.Printf("\nEND OF LINE\n")
 		c.keepRunning = false
 	case 1:
 		// set a b
@@ -350,26 +347,9 @@ func (c *Computer) errorTerminate(message string, err error) {
 		return
 	}
 
-	start, end := c.IP-5, c.IP+6
-	if start < 0 {
-		start = 0
-	}
-
-	if end > len(c.Memory) {
-		end = len(c.Memory)
-	}
-
 	fmt.Printf("Unexpected Termination Condition:\n%s: %s\n\n", message, err)
 
-	for i := start; i < end; i++ {
-		if i == c.IP {
-			fmt.Printf("--> ")
-		} else {
-			fmt.Printf("    ")
-		}
-
-		fmt.Printf("%5d: %5d\n", i, c.Memory[i])
-	}
+	fmt.Printf(c.getStatus())
 
 	c.keepRunning = false
 }
@@ -388,4 +368,49 @@ func (c *Computer) popStack() (int, error) {
 	c.Stack = c.Stack[0 : l-1]
 
 	return r, nil
+}
+
+func (c *Computer) getStatus() string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "Registers: %v\n", c.Registers)
+	fmt.Fprintf(&b, "Stack: %v\n", c.Stack)
+
+	start, end := c.IP-5, c.IP+6
+	if start < 0 {
+		start = 0
+	}
+
+	if end > len(c.Memory) {
+		end = len(c.Memory)
+	}
+
+	for i := start; i < end; i++ {
+		if i == c.IP {
+			fmt.Fprintf(&b, "--> ")
+		} else {
+			fmt.Fprintf(&b, "    ")
+		}
+
+		fmt.Fprintf(&b, "%5d: %5d\n", i, c.Memory[i])
+	}
+
+	return b.String()
+}
+
+func (c *Computer) dump() error {
+	now := time.Now()
+	filename := fmt.Sprintf("dump-%s.vm", now.Format(time.RFC3339))
+
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	encoder := json.NewEncoder(f)
+	err = encoder.Encode(c)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
