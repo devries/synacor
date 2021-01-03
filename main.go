@@ -116,6 +116,29 @@ func runMainVM(c *Computer) {
 	}
 }
 
+func runRecordedInput(c *Computer, input string) string {
+	// Get output obtained by feeding input
+	var b strings.Builder
+
+	// Run computer
+	go c.run()
+
+	// Feed in input
+	go func() {
+		for _, r := range []rune(input) {
+			c.input <- r
+		}
+		c.graceful()
+	}()
+
+	// Gather output
+	for out := range c.output {
+		b.WriteRune(out)
+	}
+
+	return b.String()
+}
+
 func displayOutput(c *Computer) {
 	for out := range c.output {
 		fmt.Printf("%c", out)
@@ -339,9 +362,15 @@ func (c *Computer) step() {
 		c.IP += 2
 	case 20:
 		// read a
+		v, ok := <-c.input
+		if !ok {
+			// Input closed, terminate program
+			c.keepRunning = false
+			break
+		}
 		a, err := c.getRegister(c.Memory[c.IP+1])
 		c.errorTerminate("Error reading input: ", err)
-		c.Registers[a] = int(<-c.input)
+		c.Registers[a] = int(v)
 		c.IP += 2
 	case 21:
 		// noop
@@ -447,6 +476,12 @@ func (c *Computer) dump() error {
 }
 
 func (c *Computer) terminate() {
+	// Terminate immediately
 	c.keepRunning = false
+	close(c.input)
+}
+
+func (c *Computer) graceful() {
+	// Gracefully terminate when next requesting input
 	close(c.input)
 }
