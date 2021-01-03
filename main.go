@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -72,17 +74,19 @@ func runMainVM(c *Computer) {
 	scanner := bufio.NewScanner(os.Stdin)
 	for c.keepRunning && scanner.Scan() {
 		v := scanner.Text()
-		switch v {
-		case "-halt":
+		switch {
+		case v == "-halt":
 			c.terminate()
-		case "-save":
+
+		case v == "-save":
 			err := c.dump()
 			if err != nil {
 				fmt.Printf("Unable to save vm: %s\n", err)
 			}
-		case "-info":
+		case v == "-info":
 			fmt.Printf(c.getStatus())
-		case "-back":
+
+		case v == "-back":
 			if len(recording) < 1 {
 				fmt.Printf("Unable to go back\n")
 				break
@@ -99,6 +103,84 @@ func runMainVM(c *Computer) {
 			}
 			go c.run()
 			go displayOutput(c)
+
+		case strings.HasPrefix(v, "-set"):
+			// set a register manually
+			fields := strings.Fields(v)
+			if len(fields) != 3 {
+				fmt.Printf("Usage: -set <register number> <value>\n")
+				break
+			}
+
+			register, err := strconv.Atoi(fields[1])
+			if err != nil {
+				fmt.Printf("Unable to parse register: %s\n", err)
+				break
+			}
+
+			val, err := strconv.Atoi(fields[2])
+			if err != nil {
+				fmt.Printf("Unable to parse value: %s\n", err)
+				break
+			}
+
+			c.Registers[register] = val
+
+		case strings.HasPrefix(v, "-test "):
+			// Test an input
+			input := v[6:] + "\n"
+			state, err := json.Marshal(c)
+			if err != nil {
+				fmt.Printf("Unable to record current vm state: %s\n", err)
+				break
+			}
+
+			c2 := NewComputer()
+			err = json.Unmarshal(state, c2)
+			if err != nil {
+				fmt.Printf("Unable to create a new VM: %s\n", err)
+				break
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+
+			result := runRecordedInput(ctx, c2, input)
+			fmt.Println("Simulated Output:")
+			fmt.Printf(result)
+			fmt.Println("-----------------")
+
+		case v == "-teleporter":
+			input := "use teleporter\n"
+			state, err := json.Marshal(c)
+			if err != nil {
+				fmt.Printf("Unable to record current vm state: %s\n", err)
+				break
+			}
+
+			setting := 0
+
+			for r := 1; r < 32768; r++ {
+				c2 := NewComputer()
+				err = json.Unmarshal(state, c2)
+				if err != nil {
+					fmt.Printf("Unable to create a new VM: %s\n", err)
+					break
+				}
+				c2.Registers[7] = r
+				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+				defer cancel()
+
+				result := runRecordedInput(ctx, c2, input)
+				if strings.Contains(result, "Unusual") {
+					fmt.Printf("Tested %d\n", r)
+				} else {
+					setting = r
+					fmt.Printf("Output is: %s\n", result)
+					break
+				}
+			}
+			fmt.Printf("Setting is %d\n", setting)
+
 		default:
 			// Record step
 			state, err := json.Marshal(c)
@@ -116,7 +198,7 @@ func runMainVM(c *Computer) {
 	}
 }
 
-func runRecordedInput(c *Computer, input string) string {
+func runRecordedInput(ctx context.Context, c *Computer, input string) string {
 	// Get output obtained by feeding input
 	var b strings.Builder
 
@@ -131,12 +213,20 @@ func runRecordedInput(c *Computer, input string) string {
 		c.graceful()
 	}()
 
-	// Gather output
-	for out := range c.output {
-		b.WriteRune(out)
-	}
+	for {
+		select {
+		case out, ok := <-c.output:
+			if !ok {
+				// Output closed, return string
+				return b.String()
+			}
+			b.WriteRune(out)
 
-	return b.String()
+		case <-ctx.Done():
+			c.terminate()
+			return b.String()
+		}
+	}
 }
 
 func displayOutput(c *Computer) {
@@ -146,13 +236,14 @@ func displayOutput(c *Computer) {
 }
 
 type Computer struct {
-	IP          int       `json:"ip"`        // instruction pointer
-	Registers   []int     `json:"registers"` // Registers
-	Memory      []int     `json:"memory"`
-	Stack       []int     `json:"stack"`
-	input       chan rune `json:"-"`
-	output      chan rune `json:"-"`
-	keepRunning bool      `json:"-"`
+	IP          int           `json:"ip"`        // instruction pointer
+	Registers   []int         `json:"registers"` // Registers
+	Memory      []int         `json:"memory"`
+	Stack       []int         `json:"stack"`
+	input       chan rune     `json:"-"`
+	output      chan rune     `json:"-"`
+	done        chan struct{} `json:"-"`
+	keepRunning bool          `json:"-"`
 }
 
 func NewComputer() *Computer {
@@ -163,6 +254,7 @@ func NewComputer() *Computer {
 	c.Stack = make([]int, 0, 16)
 	c.input = make(chan rune)
 	c.output = make(chan rune)
+	c.done = make(chan struct{})
 	c.keepRunning = true
 
 	return &c
@@ -357,7 +449,10 @@ func (c *Computer) step() {
 		// out a
 		v, err := c.getValue(c.Memory[c.IP+1])
 		c.errorTerminate("Error writing output: ", err)
-		c.output <- rune(v)
+		select {
+		case c.output <- rune(v):
+		case <-c.done:
+		}
 		// fmt.Printf("%c", rune(v))
 		c.IP += 2
 	case 20:
@@ -478,7 +573,7 @@ func (c *Computer) dump() error {
 func (c *Computer) terminate() {
 	// Terminate immediately
 	c.keepRunning = false
-	close(c.input)
+	close(c.done)
 }
 
 func (c *Computer) graceful() {
