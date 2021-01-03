@@ -36,6 +36,7 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
+		defer f.Close()
 
 		decoder := json.NewDecoder(f)
 		err = decoder.Decode(c)
@@ -45,11 +46,7 @@ func main() {
 		fmt.Println("Saved VM has been loaded.")
 	}
 
-	go c.run()
-	go provideInputFromStdin(c)
-	for out := range c.output {
-		fmt.Printf("%c", out)
-	}
+	runMainVM(c)
 }
 
 func binToProgram(input []byte) []int {
@@ -67,28 +64,61 @@ func binToProgram(input []byte) []int {
 	return out
 }
 
-func provideInputFromStdin(c *Computer) {
-	input := c.input
+func runMainVM(c *Computer) {
+	var recording [][]byte
+	go c.run()
+	go displayOutput(c)
+
 	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
+	for c.keepRunning && scanner.Scan() {
 		v := scanner.Text()
 		switch v {
 		case "-halt":
-			c.keepRunning = false
-			close(c.output)
+			c.terminate()
 		case "-save":
 			err := c.dump()
 			if err != nil {
-				fmt.Printf("Unable to save vm: %s", err)
+				fmt.Printf("Unable to save vm: %s\n", err)
 			}
 		case "-info":
 			fmt.Printf(c.getStatus())
-		default:
-			for _, r := range []rune(v) {
-				input <- r
+		case "-back":
+			if len(recording) < 1 {
+				fmt.Printf("Unable to go back\n")
+				break
 			}
-			input <- '\n'
+			state := recording[len(recording)-1]
+			recording = recording[:len(recording)-1]
+
+			c.terminate()
+			c = NewComputer()
+			err := json.Unmarshal(state, c)
+			if err != nil {
+				fmt.Printf("Unable to move to old state, exiting\n")
+				os.Exit(1)
+			}
+			go c.run()
+			go displayOutput(c)
+		default:
+			// Record step
+			state, err := json.Marshal(c)
+			if err != nil {
+				fmt.Printf("Unable to record current vm state: %s\n", err)
+			}
+			recording = append(recording, state)
+
+			// Process input
+			for _, r := range []rune(v) {
+				c.input <- r
+			}
+			c.input <- '\n'
 		}
+	}
+}
+
+func displayOutput(c *Computer) {
+	for out := range c.output {
+		fmt.Printf("%c", out)
 	}
 }
 
@@ -110,6 +140,7 @@ func NewComputer() *Computer {
 	c.Stack = make([]int, 0, 16)
 	c.input = make(chan rune)
 	c.output = make(chan rune)
+	c.keepRunning = true
 
 	return &c
 }
@@ -121,7 +152,6 @@ func (c *Computer) loadProgram(program []int) {
 }
 
 func (c *Computer) run() {
-	c.keepRunning = true
 	for c.keepRunning {
 		c.step()
 	}
@@ -409,8 +439,14 @@ func (c *Computer) dump() error {
 	encoder := json.NewEncoder(f)
 	err = encoder.Encode(c)
 	if err != nil {
+		f.Close()
 		return err
 	}
 
-	return nil
+	return f.Close()
+}
+
+func (c *Computer) terminate() {
+	c.keepRunning = false
+	close(c.input)
 }
