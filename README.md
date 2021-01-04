@@ -96,7 +96,34 @@ could easily go back to that state.
     `5489: call 6027` to `5489: noop` and `5490: noop`. Then I can use the
     teleporter and get to my destination.
 
+The next challenge is the teleporter, and this is by far the most difficult
+challenge. For this one, you have to disassemble the code and interpret it in
+order to optimize a long calculation. The information about this challenge is
+contained in a journal, which should be read carefully for clues. Essentially
+you need to be able to manipulate the 8th register (which I call `r7`), and
+read the code where the VM gets stuck. 
+
+First, I created a `-set` command which could be used to set the value in any
+register. I set `r7` to 141 and used the teleporter, and the VM started doing...
+something. I had no visibility into what was going on. At this point I ended up
+putting the problem aside for a few hours to think about how I wanted to
+complete it.
+
+In the end I created a disassembly routine which would return the assembly
+instruction given a pointer to a point in memory. I then decided to write a
+`-trace` command which would start recording the position, and command the VM
+was executing as well as counting the number of times the instruction at that
+memory location was executed. I made a corresponding `-untrace` command which
+would stop the trace and write out the commands that had been executed in
+memory order as an assembly file. I started the trace, used the teleporter, and
+then stopped the trace after the VM started the calculation. There is a sample
+of what I found below. The number to the left is the memory location, and the
+number on the right is the number of times that instruction was executed. The
+long-running routine was fairly easy to find as it contained instructions that
+had been executed hundreds of thousands of times.
+
 ```
+ ...
  5489: call 6027                      ; 1
  ...
  6027: jt r0 6035                     ; 1849558
@@ -117,6 +144,46 @@ could easily go back to that state.
  6067: ret                            ; 918459
 ```
 
+The long-running function is found in the instructions between 6027 and 6067. 
+Luckily its only 16 lines of assembly, but I noticed the instruction
+`call 6027` in lines 6045, 6054, and 6065. This is a recursive function. Now,
+I started to look at the variables. There are three registers involved: `r0`,
+`r1`, and `r7`. The `r7` register is never modified, which is good, but both
+`r0` and `r1` are modified repeatedly. Initially I thought this function would
+involve 3 input values, one for each register, and two output values for `r0`
+and `r1`, but I see that the value of `r1` is not used on any return
+within the algorithm. If the value of `r1` is discarded after the original
+call, then I could safely ignore the return value of `r1`. I could tell
+from the trace that the initial call was made from line 5489, but I needed
+more information about what would happen when that call returned, and that was
+not part of my trace.
+
+There are several `add rX rX 32767` instructions for `r0` and `r1`. In modulo
+32768 arithmetic that corresponds to subtracting 1 from the register value and
+saving that in the same register location. Based on this, it looks like `r0` and
+`r1` will get smaller as the function recurses, except at lines 6030 when `r0`
+is set to `r1+1`, and line 5042 when `r1` is set to `r7`.
+
+In order to disassemble more code, I wrote the `-diss` command which would
+write out a selectable number of instructions from any position in memory. The
+instructions around the caller of the long-running function, found using this
+command, are shown below. I added some comments manually which I will discuss
+further.
+
+```
+ 5483: set r0 4                       ; a = 4
+ 5486: set r1 1                       ; b = 1
+ 5489: call 6027                      ; tpf(a, b, c)
+ 5491: eq r1 r0 6                     ; b = a==6
+ 5495: jf r1 5579                     ; if b == 0 goto 5579
+```
+
+The value of `r1` is not used when the function returns, so I can safely ignore
+the return value `r1` and implement the long-running function as a function
+that takes three parameters and returns a single parameter. I decided to label
+the inputs `a` for `r0`, `b` for `r1`, and c for `r7`. The long-running function
+can be expressed as the function `tpf` (teleport function) below.
+
 ```go
 func tpf(a, b, c uint16) uint16 {
     if a == 0 {
@@ -135,15 +202,20 @@ func tpf(a, b, c uint16) uint16 {
 }
 ```
 
-```
- 5483: set r0 4                       ; a = 4
- 5486: set r1 1                       ; b = 1
- 5489: call 6027                      ; tpf(a, b, c)
- 5491: eq r1 r0 6                     ; b = a==6
- 5495: jf r1 5579                     ; if b == 0 goto 5579
-```
+This is a long-running function, and the only way I could think to make it a
+little faster is through memoization. We can see from lines 5483 to 5495 of the
+caller that the initial values of `r0` and `r1` are 4 and 1 respectively. The
+function is still slow, but it is possible to run this function for every value
+of `r7` between 1 and 32767, but how do I know I found the right value? Based on
+line 5491 of the bytecode, I am looking for a solution that returns the value 6.
 
-Becomes:
+My implementation is in the [teleporter](teleporter) directory. It took about
+10 minutes to run and find the appropriate value. The final step is rewriting
+the bytecode on the fly to bypass the long-running function. I wrote a
+`-teleporter` command which sets `r7` to the appropriate value, modifies the
+instruction on line 5483 to set `r0` to 6, and changes the `call 6027` instruction
+to two `noop` operations on lines 5489 and 5490. The changed instructions are
+shown below.
 
 ```
  5483: set r0 6
@@ -153,6 +225,8 @@ Becomes:
  5491: eq r1 r0 6
  5495: jf r1 5579
 ```
+
+Finally I used the teleporter, and it worked!
 
 ## The Orb, Maze, and Vault
 
