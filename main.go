@@ -673,7 +673,7 @@ func (c *Computer) getInstruction(ptr int) (int, string) {
 	op := c.Memory[ptr]
 
 	if op > 21 {
-		return c.IP, fmt.Sprintf("dat %d", op)
+		return 0, fmt.Sprintf("dat %d", op)
 	}
 
 	info := operations[op]
