@@ -71,9 +71,25 @@ func runMainVM(c *Computer) {
 	go c.run()
 	go displayOutput(c)
 
-	scanner := bufio.NewScanner(os.Stdin)
-	for c.keepRunning && scanner.Scan() {
-		v := scanner.Text()
+	input := make(chan string)
+
+	// Need to put input on an input channel so I can synchronize with possible shutdown of vm
+	go func() {
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			input <- scanner.Text()
+		}
+	}()
+
+	for c.keepRunning {
+		var v string
+		select {
+		case v = <-input:
+		case <-c.done:
+			os.Exit(0)
+		}
+
+		// v := scanner.Text()
 		switch {
 		case v == "-halt":
 			c.terminate()
@@ -314,6 +330,7 @@ func (c *Computer) step() {
 		// halt
 		fmt.Printf("\nEND OF LINE\n")
 		c.keepRunning = false
+		close(c.done)
 	case 1:
 		// set a b
 		a, err := c.getRegister(c.Memory[c.IP+1])
@@ -494,6 +511,7 @@ func (c *Computer) step() {
 			if !ok {
 				// Input closed, terminate program
 				c.keepRunning = false
+				close(c.done)
 				break
 			}
 			a, err := c.getRegister(c.Memory[c.IP+1])

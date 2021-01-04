@@ -1,20 +1,43 @@
 # The Synacor Challenge
 
-[The Synacor Challenge](https://challenge.synacor.com/) is a ...
+I look forward to the [Advent of Code](https://adventofcode.com/) each year, and
+I really enjoyed the intcode problems from the 2019 contest. This year, I kind
+of missed intcode. I heard someone else mention another puzzle by Eric Wastl, 
+[The Synacor Challenge](https://challenge.synacor.com/), which sounded like it
+would satisfy my desire for puzzles using a virtual machine, and is a great
+puzzle.
+
+I worked on it over a period of 4 days. It essentially presents a specification
+for an interpreter, and a single binary program to run on that interpreter. It
+looked pretty easy to implement, so I wondered if it would be difficult.
+It was.
 
 ## Building the Interpreter
-- State: instruction pointer, registers, stack, memory, keeprunning
-- Channels for io
-- Runs in a goroutine, synchronized on io
-- `-halt` command added to terminate
+I decided to use [Go](https://golang.org/), which I have been using and enjoying
+recently. Since I had already worked on the intcode program, I decided to use
+a similar design. I created a structure to represent the VM which includes an
+instruction pointer, registers, a stack, memory, and a boolean to indicate if it
+should keep running. I wrote a `step()` function to step forward one instruction,
+and I implemented all the opcodes. I decided to use channels for input and
+output the way I had for my intcode problems so I could run the vm in a separate
+asynchronous coroutine with synchronization on I/O.
+
+If I had it to do over again, I might think out synchronization more, but I did
+not know what was coming. In the end I believe there are a few race conditions,
+but all in all it runs well. I loaded the program, started the VM, and wrote
+output to Stdout, and took input from Stdin, and it started an adventure game.
+I explored a bit, and decided to add in the command `-halt` which is intercepted
+by my interpreter and stops the VM.
 
 ## Grues, Savepoints, and Going Back in Time
-- Make state serializable as json
-- `-save` command added to save state to file
-- `-info` command added to look at current registers, stack, and around
-    the instruction pointer in memory
-- Decided to just save state each time I enter a command, made a `-back`
-    command to go back one step.
+I started wandering around and got lost in a twisty maze. Then a Grue ate me.
+I decided it might be useful to create a `-save` command which would write the
+VM state out, then I could reload it and start from my savepoint. I decided to
+serialize everything using JSON which is well-supported for data structures in
+Go. I also added a `-info` command to look at the registers, the stack, and the
+position of the instruction pointer in memory. The output is shown below. I did
+not end up using the `-info` command often.
+
 ```
 Registers: [25975 25974 26006 0 101 0 0 0]
 Stack: [6080 16 6124 1 2826 32 6124 1 101 0]
@@ -31,9 +54,28 @@ Stack: [6080 16 6124 1 2826 32 6124 1 101 0]
      1803:    10
 ```
 
+Now I could walk around with impunity. I walked into the twisty maze, heard the
+Grue coming, made a savepoint, and then after being eaten restarted from that
+savepoint... and was promptly eaten again. I decided I needed to be able
+to back out a number of steps from a messy situation and created a `-back`
+command. Every time the program paused for input, I set the interpreter to
+automatically save state and place that in a stack of states. Every time I
+ran the `-back` command I would pop back one state. This takes up a lot of
+memory, but it is effective. Now I explored the maze, found my lantern and oil
+and I was safe from Grues.
+
 ## Coin Challenge
-- Just ran around to find coins, noticed each coin represented a number.
-- Solved on paper.
+The coin challenge involves solving the equation
+
+```
+_ + _ * _^2 + _^3 - _ = 399
+```
+
+using coins, each representing the numbers 2, 3, 5, 7, and 9. The number for
+the coin can be found by looking at it. This puzzle I worked out on paper, then
+you just had to use the coins in left to right order. I also made a save point
+when I had all the coins and was ready to insert them into the equation so I
+could easily go back to that state.
 
 ## The Teleporter Algorithm
 - Created `-set` command to manually set registers
@@ -111,4 +153,14 @@ Becomes:
  5491: eq r1 r0 6
  5495: jf r1 5579
 ```
+
+## The Orb, Maze, and Vault
+
+
+|      |      |      |      |
+| :--: | :--: | :--: | :--: |
+| *    | 8    | -    | 1    |
+| 4    | *    | 11   | *    |
+| +    | 4    | -    | 18   |
+| 22   | -    | 9    | *    |
 

@@ -18,10 +18,9 @@ func main() {
 		known := make(map[Params]uint16)
 
 		a = tpf(a, b, c, known)
-		if c%10 == 0 {
+		if c%100 == 0 {
 			fmt.Printf("%5d\n", c)
 		}
-		// fmt.Printf("%5d: %5d, %5d\n", c, a, b)
 		if a == 6 {
 			fmt.Printf("Correct Value: %d\n", c)
 			break
@@ -30,12 +29,11 @@ func main() {
 }
 
 func tpf(a, b, c uint16, known map[Params]uint16) uint16 {
-	p := Params{a, b}
-
 	if a == 0 {
 		return b + 1
 	}
 
+	p := Params{a, b}
 	if retval, ok := known[p]; ok {
 		return retval
 	}
