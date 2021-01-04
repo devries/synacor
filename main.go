@@ -621,7 +621,7 @@ func (c *Computer) writeTrace() error {
 		}
 
 		inst := c.traceReport[i]
-		fmt.Fprintf(f, "%5d: %-30s ; %6d\n", i, inst, count)
+		fmt.Fprintf(f, "%5d: %-30s ; %d\n", i, inst, count)
 	}
 
 	return f.Close()
