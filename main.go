@@ -166,7 +166,7 @@ func runMainVM(c *Computer) {
 			switch len(fields) {
 			case 1:
 				_, inst := c.getInstruction(c.IP)
-				fmt.Printf("%5d %s\n", c.IP, inst)
+				fmt.Printf("%5d: %s\n", c.IP, inst)
 			case 2:
 				ptr, err := strconv.Atoi(fields[1])
 				if err != nil {
@@ -174,7 +174,7 @@ func runMainVM(c *Computer) {
 					break
 				}
 				_, inst := c.getInstruction(ptr)
-				fmt.Printf("%5d %s\n", ptr, inst)
+				fmt.Printf("%5d: %s\n", ptr, inst)
 			case 3:
 				ptr, err := strconv.Atoi(fields[1])
 				if err != nil {
@@ -188,7 +188,7 @@ func runMainVM(c *Computer) {
 				}
 				for i := 0; i < num; i++ {
 					incr, inst := c.getInstruction(ptr)
-					fmt.Printf("%5d %s\n", ptr, inst)
+					fmt.Printf("%5d: %s\n", ptr, inst)
 					ptr += incr + 1
 				}
 			default:
@@ -484,22 +484,24 @@ func (c *Computer) step() {
 		c.errorTerminate("Error writing output: ", err)
 		select {
 		case c.output <- rune(v):
+			c.IP += 2
 		case <-c.done:
 		}
-		// fmt.Printf("%c", rune(v))
-		c.IP += 2
 	case 20:
 		// read a
-		v, ok := <-c.input
-		if !ok {
-			// Input closed, terminate program
-			c.keepRunning = false
-			break
+		select {
+		case v, ok := <-c.input:
+			if !ok {
+				// Input closed, terminate program
+				c.keepRunning = false
+				break
+			}
+			a, err := c.getRegister(c.Memory[c.IP+1])
+			c.errorTerminate("Error reading input: ", err)
+			c.Registers[a] = int(v)
+			c.IP += 2
+		case <-c.done:
 		}
-		a, err := c.getRegister(c.Memory[c.IP+1])
-		c.errorTerminate("Error reading input: ", err)
-		c.Registers[a] = int(v)
-		c.IP += 2
 	case 21:
 		// noop
 		c.IP++
@@ -619,7 +621,7 @@ func (c *Computer) writeTrace() error {
 		}
 
 		inst := c.traceReport[i]
-		fmt.Fprintf(f, "%5d %-30s %6d\n", i, inst, count)
+		fmt.Fprintf(f, "%5d: %-30s ; %6d\n", i, inst, count)
 	}
 
 	return f.Close()
