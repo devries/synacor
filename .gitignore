@@ -6,3 +6,4 @@ challenge.bin
 arch-spec
 codes.txt
 *.vm
+*.asm

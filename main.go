@@ -149,42 +149,6 @@ func runMainVM(c *Computer) {
 			fmt.Printf(result)
 			fmt.Println("-----------------")
 
-			/*
-
-				// This was an attempt to brute force the teleporter, but I need to disassemble everything
-
-					case v == "-teleporter":
-						input := "use teleporter\n"
-						state, err := json.Marshal(c)
-						if err != nil {
-							fmt.Printf("Unable to record current vm state: %s\n", err)
-							break
-						}
-
-						setting := 0
-
-						for r := 1; r < 32768; r++ {
-							c2 := NewComputer()
-							err = json.Unmarshal(state, c2)
-							if err != nil {
-								fmt.Printf("Unable to create a new VM: %s\n", err)
-								break
-							}
-							c2.Registers[7] = r
-							ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-							defer cancel()
-
-							result := runRecordedInput(ctx, c2, input)
-							if strings.Contains(result, "Unusual") {
-								fmt.Printf("Tested %d\n", r)
-							} else {
-								setting = r
-								fmt.Printf("Output is: %s\n", result)
-								break
-							}
-						}
-						fmt.Printf("Setting is %d\n", setting)
-			*/
 		case v == "-trace":
 			c.traceReport = make(map[int]string)
 			c.traceCount = make(map[int]int)
@@ -231,6 +195,14 @@ func runMainVM(c *Computer) {
 				fmt.Printf("Too many fields\n")
 				break
 			}
+
+		case v == "-teleporter":
+			// Put in information gleaned from teleporter program
+			c.Registers[7] = 25734 // Load appropriate value into register
+			c.Memory[5485] = 6     // Sets r0 to 6, which is required for check later
+			c.Memory[5489] = 21    // replace "call 6027" with "noop noop"
+			c.Memory[5490] = 21    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+			fmt.Println("Hacked teleporter")
 
 		default:
 			// Record step
@@ -633,7 +605,7 @@ func (c *Computer) dump() error {
 
 func (c *Computer) writeTrace() error {
 	now := time.Now()
-	filename := fmt.Sprintf("trace-%s.vm", now.Format(time.RFC3339))
+	filename := fmt.Sprintf("trace-%s.asm", now.Format(time.RFC3339))
 
 	f, err := os.Create(filename)
 	if err != nil {
