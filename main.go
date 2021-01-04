@@ -149,37 +149,88 @@ func runMainVM(c *Computer) {
 			fmt.Printf(result)
 			fmt.Println("-----------------")
 
-		case v == "-teleporter":
-			input := "use teleporter\n"
-			state, err := json.Marshal(c)
-			if err != nil {
-				fmt.Printf("Unable to record current vm state: %s\n", err)
+			/*
+
+				// This was an attempt to brute force the teleporter, but I need to disassemble everything
+
+					case v == "-teleporter":
+						input := "use teleporter\n"
+						state, err := json.Marshal(c)
+						if err != nil {
+							fmt.Printf("Unable to record current vm state: %s\n", err)
+							break
+						}
+
+						setting := 0
+
+						for r := 1; r < 32768; r++ {
+							c2 := NewComputer()
+							err = json.Unmarshal(state, c2)
+							if err != nil {
+								fmt.Printf("Unable to create a new VM: %s\n", err)
+								break
+							}
+							c2.Registers[7] = r
+							ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+							defer cancel()
+
+							result := runRecordedInput(ctx, c2, input)
+							if strings.Contains(result, "Unusual") {
+								fmt.Printf("Tested %d\n", r)
+							} else {
+								setting = r
+								fmt.Printf("Output is: %s\n", result)
+								break
+							}
+						}
+						fmt.Printf("Setting is %d\n", setting)
+			*/
+		case v == "-trace":
+			c.traceReport = make(map[int]string)
+			c.traceCount = make(map[int]int)
+			c.trace = true
+
+		case v == "-untrace":
+			c.trace = false
+			c.writeTrace()
+			c.traceReport = nil
+			c.traceCount = nil
+
+		case strings.HasPrefix(v, "-diss"):
+			fields := strings.Fields(v)
+
+			switch len(fields) {
+			case 1:
+				_, inst := c.getInstruction(c.IP)
+				fmt.Printf("%5d %s\n", c.IP, inst)
+			case 2:
+				ptr, err := strconv.Atoi(fields[1])
+				if err != nil {
+					fmt.Printf("Unable to parse value: %s\n", err)
+					break
+				}
+				_, inst := c.getInstruction(ptr)
+				fmt.Printf("%5d %s\n", ptr, inst)
+			case 3:
+				ptr, err := strconv.Atoi(fields[1])
+				if err != nil {
+					fmt.Printf("Unable to parse value: %s\n", err)
+					break
+				}
+				num, err := strconv.Atoi(fields[2])
+				if err != nil {
+					fmt.Printf("Unable to parse value: %s\n", err)
+					break
+				}
+				for i := 0; i < num; i++ {
+					incr, inst := c.getInstruction(ptr)
+					fmt.Printf("%5d %s\n", ptr, inst)
+					ptr += incr + 1
+				}
+			default:
+				fmt.Printf("Too many fields\n")
 				break
 			}
-
-			setting := 0
-
-			for r := 1; r < 32768; r++ {
-				c2 := NewComputer()
-				err = json.Unmarshal(state, c2)
-				if err != nil {
-					fmt.Printf("Unable to create a new VM: %s\n", err)
-					break
-				}
-				c2.Registers[7] = r
-				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
-				defer cancel()
-
-				result := runRecordedInput(ctx, c2, input)
-				if strings.Contains(result, "Unusual") {
-					fmt.Printf("Tested %d\n", r)
-				} else {
-					setting = r
-					fmt.Printf("Output is: %s\n", result)
-					break
-				}
-			}
-			fmt.Printf("Setting is %d\n", setting)
 
 		default:
 			// Record step
@@ -236,14 +287,17 @@ func displayOutput(c *Computer) {
 }
 
 type Computer struct {
-	IP          int           `json:"ip"`        // instruction pointer
-	Registers   []int         `json:"registers"` // Registers
-	Memory      []int         `json:"memory"`
-	Stack       []int         `json:"stack"`
-	input       chan rune     `json:"-"`
-	output      chan rune     `json:"-"`
-	done        chan struct{} `json:"-"`
-	keepRunning bool          `json:"-"`
+	IP          int            `json:"ip"`        // instruction pointer
+	Registers   []int          `json:"registers"` // Registers
+	Memory      []int          `json:"memory"`
+	Stack       []int          `json:"stack"`
+	input       chan rune      `json:"-"`
+	output      chan rune      `json:"-"`
+	done        chan struct{}  `json:"-"`
+	keepRunning bool           `json:"-"`
+	trace       bool           `json:"-"`
+	traceReport map[int]string `json:"-"`
+	traceCount  map[int]int    `json:"-"`
 }
 
 func NewComputer() *Computer {
@@ -256,6 +310,7 @@ func NewComputer() *Computer {
 	c.output = make(chan rune)
 	c.done = make(chan struct{})
 	c.keepRunning = true
+	c.trace = false
 
 	return &c
 }
@@ -268,6 +323,12 @@ func (c *Computer) loadProgram(program []int) {
 
 func (c *Computer) run() {
 	for c.keepRunning {
+		if c.trace {
+			_, inst := c.getInstruction(c.IP)
+			c.traceReport[c.IP] = inst
+			c.traceCount[c.IP] = c.traceCount[c.IP] + 1
+		}
+
 		c.step()
 	}
 	close(c.output)
@@ -570,6 +631,28 @@ func (c *Computer) dump() error {
 	return f.Close()
 }
 
+func (c *Computer) writeTrace() error {
+	now := time.Now()
+	filename := fmt.Sprintf("trace-%s.vm", now.Format(time.RFC3339))
+
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+
+	for i := 0; i < 32768; i++ {
+		count := c.traceCount[i]
+		if count == 0 {
+			continue
+		}
+
+		inst := c.traceReport[i]
+		fmt.Fprintf(f, "%5d %-30s %6d\n", i, inst, count)
+	}
+
+	return f.Close()
+}
+
 func (c *Computer) terminate() {
 	// Terminate immediately
 	c.keepRunning = false
@@ -579,4 +662,69 @@ func (c *Computer) terminate() {
 func (c *Computer) graceful() {
 	// Gracefully terminate when next requesting input
 	close(c.input)
+}
+
+type OpInfo struct {
+	Name string
+	NArg int
+}
+
+var operations = map[int]OpInfo{
+	0:  OpInfo{"halt", 0},
+	1:  OpInfo{"set", 2},
+	2:  OpInfo{"push", 1},
+	3:  OpInfo{"pop", 1},
+	4:  OpInfo{"eq", 3},
+	5:  OpInfo{"gt", 3},
+	6:  OpInfo{"jmp", 1},
+	7:  OpInfo{"jt", 2},
+	8:  OpInfo{"jf", 2},
+	9:  OpInfo{"add", 3},
+	10: OpInfo{"mult", 3},
+	11: OpInfo{"mod", 3},
+	12: OpInfo{"and", 3},
+	13: OpInfo{"or", 3},
+	14: OpInfo{"not", 2},
+	15: OpInfo{"rmem", 2},
+	16: OpInfo{"wmem", 2},
+	17: OpInfo{"call", 1},
+	18: OpInfo{"ret", 0},
+	19: OpInfo{"out", 1},
+	20: OpInfo{"read", 1},
+	21: OpInfo{"noop", 0},
+}
+
+// Return the memory location and information about an instruction
+func (c *Computer) getInstruction(ptr int) (int, string) {
+	op := c.Memory[ptr]
+
+	if op > 21 {
+		return c.IP, fmt.Sprintf("dat %d", op)
+	}
+
+	info := operations[op]
+
+	args := make([]string, 1, 4)
+	args[0] = info.Name
+
+	for i := 1; i <= info.NArg; i++ {
+		val := c.Memory[ptr+i]
+		if op == 19 && val < 32768 {
+			var sval string
+			if val == 10 {
+				sval = "'\\n'"
+			} else {
+				sval = fmt.Sprintf("'%c'", rune(val))
+			}
+			args = append(args, sval)
+		} else if val < 32768 {
+			sval := strconv.Itoa(val)
+			args = append(args, sval)
+		} else {
+			sval := fmt.Sprintf("r%d", val-32768)
+			args = append(args, sval)
+		}
+	}
+
+	return info.NArg, strings.Join(args, " ")
 }
