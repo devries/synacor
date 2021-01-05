@@ -78,24 +78,6 @@ when I had all the coins and was ready to insert them into the equation so I
 could easily go back to that state.
 
 ## The Teleporter Algorithm
-- Created `-set` command to manually set registers
-- Created `-test` command to create a new VM with a 100 millisecond timeout
-    and see what would happen if I entered a command, and return the output.
-    I tried using this method to check all the register numbers, but it was
-    slow and not useful.
-- Created `-trace` and `-untrace` to record the instructions I executed, and
-    how many times I executed them. Also wrote a disassembler to make it more
-    readable.
-- Found algorithm, fussed over it, memoized it. Took ~10 minutes.
-- Created `-diss` command to disassemble sections of code given starting
-    location and number of instructions to disassemble.
-- Found that I am looking for when register 0 is 6.
-- Made `-teleporter` command that sets register 7 to the appropriate number,
-    sets instruction `5483: set r0 4` to `5483: set r0 6` so that when I bypass
-    the expensive routine I have the appropriate return value, and sets
-    `5489: call 6027` to `5489: noop` and `5490: noop`. Then I can use the
-    teleporter and get to my destination.
-
 The next challenge is the teleporter, and this is by far the most difficult
 challenge. For this one, you have to disassemble the code and interpret it in
 order to optimize a long calculation. The information about this challenge is
@@ -229,7 +211,18 @@ shown below.
 Finally I used the teleporter, and it worked!
 
 ## The Orb, Maze, and Vault
+The final challenge involved finding the proper path through a set of rooms. As
+you walk room to room with an orb, the value of that orb changes. It starts at 22,
+and if you walk through rooms that are marked "+" and "4" (moving north twice)
+the orb now has a value of 26. Initially I didn't fully understand the machanic,
+and thought as each room flashed a color, that maybe I could just follow the
+green color, but the color corresponds to the operation.
 
+I systematically walked through the rooms to find the values for every room. It
+turned out to be a four by four grid shown below. You start in the lower left
+with the orb at 22, and need to end in the upper right with a value of 30. I
+spent a little time seeing if I could work this out on paper, but quickly
+discovered it would be easier to write a program to solve this.
 
 |      |      |      |      |
 | :--: | :--: | :--: | :--: |
@@ -238,3 +231,24 @@ Finally I used the teleporter, and it worked!
 | +    | 4    | -    | 18   |
 | 22   | -    | 9    | *    |
 
+There was a hint that you should find the shortest path, which suggesting doing
+a breadth-first search. I had done this for the advent of code, so I had a good
+idea how to proceed. My code is in the [maze](maze) subdirectory. I used the
+position, value of the orb, and current operation to represent the state of
+my search. This way, if I ended up on the same square with the same value as I
+had in the past, I would not continue investigating from that state. I put each
+viable option for my next state in a queue along with the path traveled to that
+point. If I found a state where my position was in the upper-right corner of the
+map, and I had the appropriate value of 30, I would then write out the path
+required to get there so I could feed that into the VM. 
+
+Initially I had a bug, but eventually this yielded the path and the last code in
+the puzzle. I put in that code, and it turned out not to be correct. I wondered
+if I had done something wrong, but realized since it was seen in a mirror the
+code was likely reversed, but reversing the order of the letters also didn't
+help. The correct code involved reversing both the order of the letters and the
+letters themselves, so for example a "p" would reverse into a "q". This tricked
+me up for a bit, but eventually I noticed all the letters were either symmetric
+around the vertical axis, or when reversed also yielded a valid letter.
+
+As I mentioned before it's a great puzzle. I enjoyed it a lot.
