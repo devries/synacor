@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"runtime"
 )
 
 type Params struct {
@@ -10,22 +11,37 @@ type Params struct {
 }
 
 func main() {
-	var a, b, c uint16
+	ncpu := runtime.NumCPU()
 
-	for c = 1; c < 32768; c++ {
-		a = 4
-		b = 1
-		known := make(map[Params]uint16)
+	throttle := make(chan int, ncpu)
+	solution := make(chan uint16)
 
-		a = tpf(a, b, c, known)
+looper:
+	for c := uint16(1); c < 32768; c++ {
+		select {
+		case sol := <-solution:
+			fmt.Printf("Solution received: %d\n", sol)
+			break looper
+		case throttle <- 1: // Only run as many workers as CPUs
+		}
 		if c%100 == 0 {
 			fmt.Printf("%5d\n", c)
 		}
-		if a == 6 {
-			fmt.Printf("Correct Value: %d\n", c)
-			break
-		}
+		go worker(c, throttle, solution)
 	}
+
+	fmt.Println("Done")
+}
+
+func worker(c uint16, throttle chan int, solution chan uint16) {
+	known := make(map[Params]uint16)
+
+	a := tpf(4, 1, c, known)
+	if a == 6 {
+		fmt.Printf("Correct Value: %d\n", c)
+		solution <- c
+	}
+	<-throttle
 }
 
 func tpf(a, b, c uint16, known map[Params]uint16) uint16 {
